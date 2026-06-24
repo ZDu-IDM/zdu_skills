@@ -1,0 +1,9 @@
+# Runtime dependencies for the repo-skills scanning toolset (scripts/).
+#
+# requests  — HTTP client used to talk to the GitHub API and raw.githubusercontent.com.
+# PyYAML    — parses SKILL.md YAML frontmatter (lists/dicts). Optional: the scanner
+#             degrades to a regex fallback if it's missing, but install it for
+#             correct handling of list/dict metadata values.
+
+requests>=2.25
+PyYAML>=5.4

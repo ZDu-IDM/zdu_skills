@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "repos": [
+    {
+      "added_at": "2026-06-24T17:37:55Z",
+      "name": "skills",
+      "input": "anthropics/skills",
+      "source": "anthropics/skills",
+      "local": false,
+      "ref": "main",
+      "last_scanned_at": "2026-06-24T17:37:55Z"
+    },
+    {
+      "added_at": "2026-06-24T17:30:27Z",
+      "name": "zdu_skills",
+      "input": "C:\\work\\AI\\zdu_skills",
+      "source": "C:\\work\\AI\\zdu_skills",
+      "local": true,
+      "ref": "local clone",
+      "last_scanned_at": "2026-06-24T17:30:27Z"
+    }
+  ]
+}
