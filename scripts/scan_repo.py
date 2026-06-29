@@ -361,6 +361,51 @@ def _marketplace_name(blobs: list[str], read_text) -> str | None:
         return None
 
 
+def _strip_dotslash(path: str) -> str:
+    """Normalize a manifest path: drop leading ``./`` segments and surrounding slashes."""
+    p = (path or "").strip().replace("\\", "/")
+    while p.startswith("./"):
+        p = p[2:]
+    return p.strip("/")
+
+
+def _marketplace_plugin_skill_map(blobs: list[str], read_text) -> dict[str, str]:
+    """Map each skill *directory* to its plugin name via marketplace.json's ``plugins``.
+
+    Some repos (notably anthropics/skills) declare plugins *inline* in
+    ``marketplace.json`` — each plugin lists its member skills by path in a
+    ``skills`` array (e.g. ``"./skills/xlsx"``) — instead of dropping a
+    ``plugin.json`` inside each plugin root. Those skills have no ``plugin.json``
+    ancestor, so :func:`_find_owning_plugin` can't see them. This resolves the
+    by-reference style: ``{<skill_dir>: <plugin name>}``, where ``<skill_dir>`` is
+    the plugin ``source`` joined with each ``skills`` entry (both ``./``-relative).
+    """
+    if MARKETPLACE_MANIFEST not in set(blobs):
+        return {}
+    text = read_text(MARKETPLACE_MANIFEST)
+    if not text:
+        return {}
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+
+    mapping: dict[str, str] = {}
+    for plugin in data.get("plugins", []) or []:
+        if not isinstance(plugin, dict):
+            continue
+        name = plugin.get("name")
+        if not name:
+            continue
+        source = _strip_dotslash(plugin.get("source") or "")
+        for skill_ref in plugin.get("skills", []) or []:
+            ref = _strip_dotslash(skill_ref if isinstance(skill_ref, str) else "")
+            skill_dir = "/".join(p for p in (source, ref) if p)
+            if skill_dir:
+                mapping[skill_dir] = name
+    return mapping
+
+
 def _find_owning_plugin(skill_dir: str, plugin_roots) -> str | None:
     """Return the nearest ancestor (or self) that is a plugin root, else None."""
     current = PurePosixPath(skill_dir)
@@ -437,6 +482,7 @@ def _build_skills(
     plugin_names = _plugin_roots_and_names(blobs, read_text)
     plugin_roots = set(plugin_names)
     market_name = _marketplace_name(blobs, read_text)
+    market_skill_map = _marketplace_plugin_skill_map(blobs, read_text)
 
     skills = []
     for md_path in skill_md_paths:
@@ -445,8 +491,12 @@ def _build_skills(
         fm_name, description, metadata = parse_skill_md(skill_md_text)
         name = fm_name or _skill_name_from_path(md_path)
 
+        # Prefer a plugin.json-based owning root; fall back to marketplace.json's
+        # by-reference skill list for repos that declare plugins inline.
         owning_root = _find_owning_plugin(skill_dir, plugin_roots)
         plugin_name = plugin_names.get(owning_root) if owning_root else None
+        if plugin_name is None:
+            plugin_name = market_skill_map.get(skill_dir)
         installation = _install_steps(
             name, skill_dir, plugin_name,
             market_source=install_ctx["market_source"],
