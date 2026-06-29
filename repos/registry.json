@@ -2,13 +2,31 @@
   "schema_version": 1,
   "repos": [
     {
+      "added_at": "2026-06-25T16:17:50Z",
+      "name": "idm-agent-skills",
+      "input": "https://github.com/InstituteforDiseaseModeling/idm-agent-skills",
+      "source": "InstituteforDiseaseModeling/idm-agent-skills",
+      "local": false,
+      "ref": "main",
+      "last_scanned_at": "2026-06-29T14:18:51Z"
+    },
+    {
+      "added_at": "2026-06-25T16:17:30Z",
+      "name": "idm_standards",
+      "input": "https://github.com/InstituteforDiseaseModeling/idm_standards",
+      "source": "InstituteforDiseaseModeling/idm_standards",
+      "local": false,
+      "ref": "main",
+      "last_scanned_at": "2026-06-29T14:18:54Z"
+    },
+    {
       "added_at": "2026-06-24T17:37:55Z",
       "name": "skills",
       "input": "anthropics/skills",
       "source": "anthropics/skills",
       "local": false,
       "ref": "main",
-      "last_scanned_at": "2026-06-24T17:37:55Z"
+      "last_scanned_at": "2026-06-29T14:18:57Z"
     },
     {
       "added_at": "2026-06-24T17:30:27Z",
@@ -17,7 +35,7 @@
       "source": "C:\\work\\AI\\zdu_skills",
       "local": true,
       "ref": "local clone",
-      "last_scanned_at": "2026-06-24T17:30:27Z"
+      "last_scanned_at": "2026-06-29T14:18:57Z"
     }
   ]
 }

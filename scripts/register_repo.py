@@ -31,13 +31,12 @@ from pathlib import Path
 import scan_repo
 import generate_skills_view
 import registry
-from scan_repo import DEFAULT_MAX_FILE_BYTES, DEFAULT_REPOS_DIR, ScanError
+from scan_repo import DEFAULT_REPOS_DIR, ScanError
 
 
 def register_repo(
     repo_input: str,
     repos_dir: str = DEFAULT_REPOS_DIR,
-    max_file_bytes: int = DEFAULT_MAX_FILE_BYTES,
     make_view: bool = True,
     record: bool = True,
 ) -> tuple[dict, Path, Path | None]:
@@ -45,7 +44,7 @@ def register_repo(
 
     Returns ``(data, json_path, html_path_or_None)``.
     """
-    data = scan_repo.scan_repo(repo_input, max_file_bytes)
+    data = scan_repo.scan_repo(repo_input)
     json_path = scan_repo.write_skills_json(data, repos_dir)
 
     html_path: Path | None = None
@@ -79,10 +78,6 @@ def main(argv: list[str] | None = None) -> int:
         help=f"Base directory for per-repo output (default: {DEFAULT_REPOS_DIR}).",
     )
     parser.add_argument(
-        "--max-file-bytes", type=int, default=DEFAULT_MAX_FILE_BYTES,
-        help="Skip embedding files larger than this (still listed). Default: 5 MiB.",
-    )
-    parser.add_argument(
         "--no-view", action="store_true",
         help="Only scan and write skills.json; skip generating the HTML page.",
     )
@@ -97,7 +92,6 @@ def main(argv: list[str] | None = None) -> int:
         data, json_path, html_path = register_repo(
             args.repo,
             repos_dir=args.repos_dir,
-            max_file_bytes=args.max_file_bytes,
             make_view=not args.no_view,
             record=not args.no_register,
         )

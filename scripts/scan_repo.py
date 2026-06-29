@@ -2,10 +2,10 @@
 
 A "skill" is any directory containing a ``SKILL.md`` file. This script finds every
 ``SKILL.md`` in a repo — either a **GitHub repo** (via the GitHub API, no clone) or
-an **already-cloned local directory** (walked on disk) — reads each skill's files,
-and writes a single self-contained ``skills.json`` that carries *everything* needed
-to later build the interactive ``repo_skills.html`` (including each file's bytes,
-base64-encoded, for the in-browser ZIP download).
+an **already-cloned local directory** (walked on disk) — reads each skill's
+``SKILL.md`` to parse its frontmatter (name, description, metadata), and writes a
+single ``skills.json`` describing every skill. Only ``SKILL.md`` is read; the page
+no longer embeds supporting-file bytes, so nothing else needs to be fetched.
 
 This is the *scan* half of the original ``scan_repo_skills.py``; rendering lives in
 ``generate_skills_view.py``. The orchestrator ``register_repo.py`` calls both.
@@ -27,7 +27,6 @@ Set GITHUB_TOKEN to raise the API rate limit (60 -> 5000 req/hr) and scan privat
 from __future__ import annotations
 
 import argparse
-import base64
 import json
 import os
 import re
@@ -57,10 +56,14 @@ GITHUB_API = "https://api.github.com"
 GITHUB_RAW = "https://raw.githubusercontent.com"
 API_TIMEOUT = 15
 RAW_TIMEOUT = 20
-# Guard against accidentally bloating the JSON/HTML with huge binary blobs. Files
-# larger than this are still *listed*, but their bytes aren't embedded, so they
-# are skipped from the in-browser ZIP. Tune via --max-file-bytes.
-DEFAULT_MAX_FILE_BYTES = 5 * 1024 * 1024
+
+# Frontmatter keys that are intentionally *not* carried into skills.json (and so
+# never reach the page): the title/description are promoted to their own fields,
+# and license / allowed-tools / argument-hint are deliberately omitted.
+_METADATA_EXCLUDE = {
+    "name", "description", "license",
+    "allowed-tools", "allowed_tools", "argument-hint", "argument_hint",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +133,7 @@ def parse_skill_md(text: str) -> tuple[str | None, str, dict]:
         metadata = {
             k: v
             for k, v in data.items()
-            if str(k).lower() not in ("name", "description")
+            if str(k).lower() not in _METADATA_EXCLUDE
         }
 
     if not description:
@@ -247,7 +250,7 @@ def fetch_raw_bytes(owner: str, repo: str, ref: str, path: str) -> bytes | None:
 
 
 # ---------------------------------------------------------------------------
-# Supporting-file attribution
+# Path helpers
 # ---------------------------------------------------------------------------
 
 def _dirname(path: str) -> str:
@@ -257,27 +260,6 @@ def _dirname(path: str) -> str:
 def _skill_name_from_path(path: str) -> str:
     parent = _dirname(path)
     return parent.rsplit("/", 1)[-1] if parent else SKILL_FILE
-
-
-def _attribute_supporting_files(
-    blobs: list[str], skill_md_paths: list[str]
-) -> dict[str, list[str]]:
-    """Map each skill's SKILL.md path to its supporting files (nearest folder wins)."""
-    skill_set = set(skill_md_paths)
-    dir_to_md = {_dirname(md): md for md in skill_md_paths}
-    dirs = sorted((d for d in dir_to_md if d), key=len, reverse=True)
-
-    result: dict[str, list[str]] = {md: [] for md in skill_md_paths}
-    for blob in blobs:
-        if blob in skill_set:
-            continue
-        for d in dirs:
-            if blob.startswith(d + "/"):
-                result[dir_to_md[d]].append(blob)
-                break
-    for md in result:
-        result[md].sort()
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -307,68 +289,39 @@ def list_local_tree(root: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Scan: build the full dataset (including file bytes for client-side ZIP)
+# Scan: build the skill records from each SKILL.md's frontmatter
 # ---------------------------------------------------------------------------
 
 def _build_skills(
     blobs: list[str],
-    default_folder: str,
-    read_bytes,          # (rel_path) -> bytes | None
+    read_text,           # (rel_path) -> str | None  (decoded SKILL.md contents)
     make_url,            # (rel_path) -> str
-    max_file_bytes: int,
 ) -> list[dict]:
-    """Turn a flat file list into skill records, embedding bytes for the ZIP.
+    """Turn a flat file list into skill records from each ``SKILL.md``.
 
-    Backend-agnostic: ``read_bytes`` and ``make_url`` abstract over "fetch from
+    Backend-agnostic: ``read_text`` and ``make_url`` abstract over "fetch from
     GitHub" vs. "read from disk", so the GitHub and local paths share this loop.
+    Only ``SKILL.md`` files are read — no supporting files are fetched.
     """
     skill_md_paths = sorted(p for p in blobs if p.rsplit("/", 1)[-1] == SKILL_FILE)
-    supporting = _attribute_supporting_files(blobs, skill_md_paths)
 
     skills = []
     for md_path in skill_md_paths:
-        skill_dir = _dirname(md_path)
-        # The folder name used as the ZIP's top-level directory.
-        folder = skill_dir.rsplit("/", 1)[-1] if skill_dir else default_folder
-
-        member_paths = [md_path] + supporting.get(md_path, [])
-        files = []
-        skill_md_text = ""
-        for repo_path in member_paths:
-            rel = repo_path[len(skill_dir) + 1:] if skill_dir else repo_path
-            content = read_bytes(repo_path)
-            entry = {
-                "path": rel,            # path relative to the skill folder
-                "url": make_url(repo_path),
-                "size": len(content) if content is not None else 0,
-            }
-            if content is None:
-                entry["b64"] = None     # unreadable — listed but not zippable
-            elif len(content) > max_file_bytes:
-                entry["b64"] = None     # too big to embed — listed but not zippable
-                entry["skipped"] = True
-            else:
-                entry["b64"] = base64.b64encode(content).decode("ascii")
-            files.append(entry)
-            if repo_path == md_path and content is not None:
-                skill_md_text = content.decode("utf-8", errors="replace")
-
+        skill_md_text = read_text(md_path) or ""
         fm_name, description, metadata = parse_skill_md(skill_md_text)
         skills.append({
             "name": fm_name or _skill_name_from_path(md_path),
-            "folder": folder,
             "description": description,
             "path": md_path,
             "url": make_url(md_path),
             "metadata": _jsonsafe(metadata),
-            "files": files,
         })
 
     skills.sort(key=lambda s: s["name"].lower())
     return skills
 
 
-def scan_repo(repo_input: str, max_file_bytes: int = DEFAULT_MAX_FILE_BYTES) -> dict:
+def scan_repo(repo_input: str) -> dict:
     """Scan a GitHub repo *or* a local clone, depending on the input.
 
     If ``repo_input`` is an existing directory it is walked on disk; otherwise it
@@ -376,9 +329,9 @@ def scan_repo(repo_input: str, max_file_bytes: int = DEFAULT_MAX_FILE_BYTES) -> 
     is the full ``skills.json`` payload (schema_version + timestamp + skills).
     """
     if is_local_repo(repo_input):
-        data = scan_local_repo(repo_input, max_file_bytes)
+        data = scan_local_repo(repo_input)
     else:
-        data = scan_github_repo(repo_input, max_file_bytes)
+        data = scan_github_repo(repo_input)
 
     # Stamp schema/version metadata at the front so skills.json self-describes.
     return {
@@ -388,19 +341,20 @@ def scan_repo(repo_input: str, max_file_bytes: int = DEFAULT_MAX_FILE_BYTES) -> 
     }
 
 
-def scan_github_repo(repo_input: str, max_file_bytes: int) -> dict:
-    """Detect every skill via the GitHub API, embedding file bytes (base64)."""
+def scan_github_repo(repo_input: str) -> dict:
+    """Detect every skill via the GitHub API, reading each SKILL.md's frontmatter."""
     owner, repo, requested_ref = parse_repo_input(repo_input)
     ref = resolve_ref(owner, repo, requested_ref)
     blobs, truncated = list_tree(owner, repo, ref)
 
-    def read_bytes(path: str) -> bytes | None:
-        return fetch_raw_bytes(owner, repo, ref, path)
+    def read_text(path: str) -> str | None:
+        content = fetch_raw_bytes(owner, repo, ref, path)
+        return content.decode("utf-8", errors="replace") if content is not None else None
 
     def make_url(path: str) -> str:
         return f"https://github.com/{owner}/{repo}/blob/{ref}/{path}"
 
-    skills = _build_skills(blobs, repo, read_bytes, make_url, max_file_bytes)
+    skills = _build_skills(blobs, read_text, make_url)
     return {
         "owner": owner,
         "repo": repo,
@@ -413,8 +367,8 @@ def scan_github_repo(repo_input: str, max_file_bytes: int) -> dict:
     }
 
 
-def scan_local_repo(repo_input: str, max_file_bytes: int) -> dict:
-    """Detect every skill by walking a local clone, embedding file bytes (base64)."""
+def scan_local_repo(repo_input: str) -> dict:
+    """Detect every skill by walking a local clone, reading each SKILL.md's frontmatter."""
     root = os.path.abspath(os.path.expanduser(repo_input))
     if not os.path.isdir(root):
         raise ScanError(f"Local path is not a directory: {root}")
@@ -422,10 +376,10 @@ def scan_local_repo(repo_input: str, max_file_bytes: int) -> dict:
     repo = os.path.basename(root.rstrip(os.sep)) or root
     blobs = list_local_tree(root)
 
-    def read_bytes(path: str) -> bytes | None:
+    def read_text(path: str) -> str | None:
         try:
             with open(os.path.join(root, path), "rb") as fh:
-                return fh.read()
+                return fh.read().decode("utf-8", errors="replace")
         except OSError:
             return None
 
@@ -433,7 +387,7 @@ def scan_local_repo(repo_input: str, max_file_bytes: int) -> dict:
         # A file:// URI so the link opens the actual file from the browser.
         return (Path(root) / path).as_uri()
 
-    skills = _build_skills(blobs, repo, read_bytes, make_url, max_file_bytes)
+    skills = _build_skills(blobs, read_text, make_url)
     return {
         "owner": "",
         "repo": repo,
@@ -490,15 +444,11 @@ def main(argv: list[str] | None = None) -> int:
         "--repos-dir", default=DEFAULT_REPOS_DIR,
         help=f"Base directory for per-repo output (default: {DEFAULT_REPOS_DIR}).",
     )
-    parser.add_argument(
-        "--max-file-bytes", type=int, default=DEFAULT_MAX_FILE_BYTES,
-        help="Skip embedding files larger than this (still listed). Default: 5 MiB.",
-    )
     args = parser.parse_args(argv)
 
     try:
         print(f"Scanning {args.repo} …", file=sys.stderr)
-        data = scan_repo(args.repo, args.max_file_bytes)
+        data = scan_repo(args.repo)
         out_path = write_skills_json(data, args.repos_dir)
     except ScanError as exc:
         print(f"Error: {exc}", file=sys.stderr)

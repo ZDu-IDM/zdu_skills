@@ -24,12 +24,11 @@ import registry
 import generate_all_skills_view
 import generate_skills_view
 from generate_all_skills_view import DEFAULT_ALL_VIEW
-from scan_repo import DEFAULT_MAX_FILE_BYTES, DEFAULT_REPOS_DIR, ScanError
+from scan_repo import DEFAULT_REPOS_DIR, ScanError
 
 
 def rescan_all(
     repos_dir: str = DEFAULT_REPOS_DIR,
-    max_file_bytes: int = DEFAULT_MAX_FILE_BYTES,
     make_view: bool = True,
 ) -> tuple[list[str], list[tuple[str, str]]]:
     """Re-scan every registered repo. Returns ``(succeeded_names, failures)``.
@@ -52,7 +51,6 @@ def rescan_all(
             register_repo.register_repo(
                 ref_input,
                 repos_dir=repos_dir,
-                max_file_bytes=max_file_bytes,
                 make_view=make_view,
                 record=True,
             )
@@ -77,10 +75,6 @@ def main(argv: list[str] | None = None) -> int:
         help=f"Base directory holding the registry and scans (default: {DEFAULT_REPOS_DIR}).",
     )
     parser.add_argument(
-        "--max-file-bytes", type=int, default=DEFAULT_MAX_FILE_BYTES,
-        help="Skip embedding files larger than this (still listed). Default: 5 MiB.",
-    )
-    parser.add_argument(
         "--no-view", action="store_true",
         help="Skip regenerating each repo's own repo_skills.html.",
     )
@@ -101,7 +95,6 @@ def main(argv: list[str] | None = None) -> int:
 
     succeeded, failures = rescan_all(
         repos_dir=args.repos_dir,
-        max_file_bytes=args.max_file_bytes,
         make_view=not args.no_view,
     )
 

@@ -3,12 +3,11 @@
 This is the *rendering* half of the original ``scan_repo_skills.py``: it does no
 scanning and never touches the network. It takes the ``skills.json`` produced by
 ``scan_repo.py`` and emits one static HTML page that lets you search/filter the
-skills, export JSON/CSV, and download any skill's folder as a ZIP — all built in
-the browser from file bytes embedded in the page, so it works offline.
+skills and export the listing as JSON/CSV.
 
-The page is intentionally one file with no external dependencies: styles are
-inline, and the ZIP encoder is a minimal pure-JS STORE-method writer (with a
-CRC32 table) so downloads work offline with no CDN.
+The page is intentionally one file with no external dependencies: all styles are
+inline, so it works offline with no CDN. Each skill card carries an Expand/Collapse
+"Installation Steps" section (placeholder content for now).
 
 Usage:
     python generate_skills_view.py --input repos/skills/skills.json
@@ -58,9 +57,8 @@ def write_html(data: dict, output_path: str | Path) -> Path:
     return out_path
 
 
-# The page is intentionally one file with no external dependencies: styles are
-# inline, and the ZIP encoder below is a minimal pure-JS STORE-method writer
-# (with a CRC32 table) so downloads work offline with no CDN.
+# The page is intentionally one file with no external dependencies: all styles
+# are inline, so it works offline with no CDN.
 _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -99,10 +97,8 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   details { font-size:12px; color:var(--muted); }
   details summary { cursor:pointer; }
   details ul { margin:6px 0 0; padding-left:18px; }
-  .row { display:flex; gap:8px; margin-top:auto; padding-top:6px; }
+  .install-steps { margin:6px 0 0; color:var(--muted); }
   .empty { color:var(--muted); padding:40px; text-align:center; }
-  a.filelink { color:var(--accent); text-decoration:none; }
-  .skip { color:#d29922; }
 </style>
 </head>
 <body>
@@ -120,8 +116,6 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         <option value="name-asc">Name (A→Z)</option>
         <option value="name-desc">Name (Z→A)</option>
         <option value="path-asc">Path (A→Z)</option>
-        <option value="files-desc">Files (most)</option>
-        <option value="files-asc">Files (fewest)</option>
       </select>
     </label>
     <label class="ctrl">Per page
@@ -153,78 +147,12 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 "use strict";
 const DATA = JSON.parse(document.getElementById("data").textContent);
 
-/* ---- tiny pure-JS ZIP (STORE method) so downloads work offline ---------- */
-const CRC_TABLE = (() => {
-  const t = new Uint32Array(256);
-  for (let n = 0; n < 256; n++) {
-    let c = n;
-    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
-    t[n] = c >>> 0;
-  }
-  return t;
-})();
-function crc32(bytes) {
-  let c = 0xFFFFFFFF;
-  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
-  return (c ^ 0xFFFFFFFF) >>> 0;
-}
-function b64ToBytes(b64) {
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-function strBytes(s) { return new TextEncoder().encode(s); }
-// Build a ZIP archive (no compression) from [{name, bytes}].
-function makeZip(entries) {
-  const chunks = [], central = [];
-  let offset = 0;
-  const u16 = n => [n & 0xFF, (n >>> 8) & 0xFF];
-  const u32 = n => [n & 0xFF, (n >>> 8) & 0xFF, (n >>> 16) & 0xFF, (n >>> 24) & 0xFF];
-  for (const e of entries) {
-    const nameBytes = strBytes(e.name);
-    const crc = crc32(e.bytes), size = e.bytes.length;
-    const local = [].concat(
-      u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0),
-      u32(crc), u32(size), u32(size), u16(nameBytes.length), u16(0)
-    );
-    chunks.push(new Uint8Array(local), nameBytes, e.bytes);
-    const localLen = local.length + nameBytes.length + size;
-    central.push([].concat(
-      u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0),
-      u32(crc), u32(size), u32(size), u16(nameBytes.length),
-      u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset)
-    ), Array.from(nameBytes));
-    offset += localLen;
-  }
-  const centralStart = offset;
-  let centralLen = 0;
-  const centralChunks = [];
-  for (const c of central) { const a = new Uint8Array(c); centralChunks.push(a); centralLen += a.length; }
-  const end = [].concat(
-    u32(0x06054b50), u16(0), u16(0), u16(entries.length), u16(entries.length),
-    u32(centralLen), u32(centralStart), u16(0)
-  );
-  const parts = [...chunks, ...centralChunks, new Uint8Array(end)];
-  return new Blob(parts, { type: "application/zip" });
-}
-
 function download(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url; a.download = filename;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function downloadSkillZip(skill) {
-  const entries = [];
-  for (const f of skill.files) {
-    if (!f.b64) continue;  // unreadable / too-large files are skipped
-    entries.push({ name: skill.folder + "/" + f.path, bytes: b64ToBytes(f.b64) });
-  }
-  if (!entries.length) { alert("No embedded files available to zip for this skill."); return; }
-  download(makeZip(entries), (skill.folder || "skill").replace(/[^\w.-]+/g, "_") + ".zip");
 }
 
 /* ---- export helpers ----------------------------------------------------- */
@@ -238,14 +166,13 @@ function csvCell(v) { return '"' + String(v).replace(/"/g, '""') + '"'; }
 function exportCsv() {
   // In aggregate mode prepend a "repo" column so rows stay attributable.
   const head = (DATA.aggregate ? ["repo"] : []).concat(
-    ["name", "description", "path", "url", "metadata", "files"]);
+    ["name", "description", "path", "url", "metadata"]);
   const rows = [head.join(",")];
   for (const s of DATA.skills) {
     const cells = DATA.aggregate ? [csvCell(s.repo || "")] : [];
     rows.push(cells.concat([
       csvCell(s.name), csvCell(s.description), csvCell(s.path), csvCell(s.url),
       csvCell(JSON.stringify(s.metadata || {})),
-      csvCell(s.files.map(f => f.path).join(" | ")),
     ]).join(","));
   }
   // UTF-8 BOM so Excel reads non-ASCII correctly.
@@ -257,10 +184,12 @@ function exportCsv() {
 const esc = s => String(s).replace(/[&<>"']/g, c =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+// Frontmatter keys we never surface as tags (kept out of the page on purpose).
+const META_HIDDEN = new Set(["license", "allowed-tools", "allowed_tools", "argument-hint", "argument_hint"]);
+
 // Flatten a skill to one lowercase string for substring filtering.
 function haystack(s) {
   const parts = [s.name, s.description, s.path, s.repo || "", s.source || "", JSON.stringify(s.metadata || {})];
-  for (const f of s.files) parts.push(f.path);
   return parts.join("  ").toLowerCase();
 }
 DATA.skills.forEach(s => { s._hay = haystack(s); });
@@ -269,20 +198,18 @@ function metaTags(md) {
   if (!md || typeof md !== "object") return "";
   const tags = [];
   for (const [k, v] of Object.entries(md)) {
+    if (META_HIDDEN.has(String(k).toLowerCase())) continue;
     const val = Array.isArray(v) ? v.join(", ") : (typeof v === "object" ? JSON.stringify(v) : v);
     tags.push('<span class="tag">' + esc(k) + ": " + esc(val) + "</span>");
   }
   return tags.length ? '<div class="tags">' + tags.join("") + "</div>" : "";
 }
 
-function fileList(s) {
-  if (!s.files.length) return "";
-  const items = s.files.map(f => {
-    const skip = f.b64 ? "" : ' <span class="skip">(not embedded)</span>';
-    return "<li><a class='filelink' href='" + esc(f.url) + "' target='_blank' rel='noopener'>" +
-           esc(f.path) + "</a>" + skip + "</li>";
-  }).join("");
-  return "<details><summary>" + s.files.length + " file(s)</summary><ul>" + items + "</ul></details>";
+// Expand/Collapse section reserved for per-skill installation steps.
+// Content is a placeholder for now; real steps will be filled in later.
+function installSteps(s) {
+  return "<details><summary>Installation Steps</summary>" +
+    '<p class="install-steps">Installation steps coming soon.</p></details>';
 }
 
 function card(s, i) {
@@ -292,8 +219,7 @@ function card(s, i) {
     (s.description ? '<div class="desc">' + esc(s.description) + "</div>" : "") +
     '<div class="path"><a href="' + esc(s.url) + '" target="_blank" rel="noopener">' + esc(s.path) + "</a></div>" +
     metaTags(s.metadata) +
-    fileList(s) +
-    '<div class="row"><button class="primary" data-zip="' + i + '">Download ZIP</button></div>' +
+    installSteps(s) +
   "</div>";
 }
 
@@ -313,13 +239,11 @@ const nextEl = document.getElementById("next");
 let page = 1;  // 1-based; reset to 1 whenever the matched set changes.
 
 // Comparators keyed by the Sort dropdown's value. Each pair is {s, i} where
-// i is the original index into DATA.skills (preserved so Download ZIP works).
+// i is the original index into DATA.skills.
 const SORTERS = {
   "name-asc":   (a, b) => a.s.name.toLowerCase().localeCompare(b.s.name.toLowerCase()),
   "name-desc":  (a, b) => b.s.name.toLowerCase().localeCompare(a.s.name.toLowerCase()),
   "path-asc":   (a, b) => a.s.path.toLowerCase().localeCompare(b.s.path.toLowerCase()),
-  "files-desc": (a, b) => b.s.files.length - a.s.files.length || SORTERS["name-asc"](a, b),
-  "files-asc":  (a, b) => a.s.files.length - b.s.files.length || SORTERS["name-asc"](a, b),
 };
 
 function matched() {
@@ -402,8 +326,6 @@ nextEl.addEventListener("click", () => { page++; render(); window.scrollTo(0, 0)
 document.getElementById("exportJson").addEventListener("click", exportJson);
 document.getElementById("exportCsv").addEventListener("click", exportCsv);
 grid.addEventListener("click", e => {
-  const btn = e.target.closest("button[data-zip]");
-  if (btn) { downloadSkillZip(DATA.skills[Number(btn.dataset.zip)]); return; }
   // Clicking a repo badge (aggregate view) filters down to that repo.
   const badge = e.target.closest(".repo-badge[data-repo]");
   if (badge && DATA.aggregate && repoFilterEl) {

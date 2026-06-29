@@ -59,8 +59,6 @@ lower-level functions in-process.
 | `scan_repo.py` | Low-level: scan one repo → `skills.json`. |
 | `generate_skills_view.py` | Low-level: render one `skills.json` → `repo_skills.html`. |
 
-> `scan_repo_skills.py` is the original all-in-one script, kept as a reference.
-
 ### `register_repo.py`
 
 ```bash
