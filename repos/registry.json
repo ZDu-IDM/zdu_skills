@@ -8,7 +8,7 @@
       "source": "InstituteforDiseaseModeling/idm-agent-skills",
       "local": false,
       "ref": "main",
-      "last_scanned_at": "2026-06-29T14:18:51Z"
+      "last_scanned_at": "2026-06-29T14:47:24Z"
     },
     {
       "added_at": "2026-06-25T16:17:30Z",
@@ -17,7 +17,7 @@
       "source": "InstituteforDiseaseModeling/idm_standards",
       "local": false,
       "ref": "main",
-      "last_scanned_at": "2026-06-29T14:18:54Z"
+      "last_scanned_at": "2026-06-29T14:47:28Z"
     },
     {
       "added_at": "2026-06-24T17:37:55Z",
@@ -26,7 +26,7 @@
       "source": "anthropics/skills",
       "local": false,
       "ref": "main",
-      "last_scanned_at": "2026-06-29T14:18:57Z"
+      "last_scanned_at": "2026-06-29T14:47:34Z"
     },
     {
       "added_at": "2026-06-24T17:30:27Z",
@@ -35,7 +35,7 @@
       "source": "C:\\work\\AI\\zdu_skills",
       "local": true,
       "ref": "local clone",
-      "last_scanned_at": "2026-06-29T14:18:57Z"
+      "last_scanned_at": "2026-06-29T14:47:34Z"
     }
   ]
 }

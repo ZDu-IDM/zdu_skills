@@ -3,9 +3,11 @@
 A "skill" is any directory containing a ``SKILL.md`` file. This script finds every
 ``SKILL.md`` in a repo — either a **GitHub repo** (via the GitHub API, no clone) or
 an **already-cloned local directory** (walked on disk) — reads each skill's
-``SKILL.md`` to parse its frontmatter (name, description, metadata), and writes a
-single ``skills.json`` describing every skill. Only ``SKILL.md`` is read; the page
-no longer embeds supporting-file bytes, so nothing else needs to be fetched.
+``SKILL.md`` to parse its frontmatter (name, description, metadata), classifies it
+as a **plugin** or **standalone** skill (via ``.claude-plugin/plugin.json`` and
+``marketplace.json``), and records copy-pasteable **installation steps**. The result
+is a single ``skills.json`` describing every skill. Only ``SKILL.md`` and the plugin
+manifests are read; no supporting-file bytes are embedded.
 
 This is the *scan* half of the original ``scan_repo_skills.py``; rendering lives in
 ``generate_skills_view.py``. The orchestrator ``register_repo.py`` calls both.
@@ -30,9 +32,10 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
 
 import requests
@@ -275,6 +278,24 @@ def is_local_repo(repo_input: str) -> bool:
     return bool(repo_input) and os.path.isdir(os.path.expanduser(repo_input))
 
 
+def git_remote_slug(root: str) -> str | None:
+    """Return the ``owner/repo`` slug of a local clone's ``origin`` remote, if any.
+
+    Lets a locally-scanned clone still emit GitHub-style install steps
+    (``git clone https://github.com/owner/repo.git``) instead of a machine-local
+    path. Returns ``None`` when there's no git, no remote, or no GitHub origin.
+    """
+    try:
+        url = subprocess.check_output(
+            ["git", "-C", str(root), "config", "--get", "remote.origin.url"],
+            text=True, stderr=subprocess.DEVNULL,
+        ).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        return None
+    match = re.search(r"github\.com[:/](?P<slug>[^/]+/[^/]+?)(?:\.git)?/?$", url)
+    return match.group("slug") if match else None
+
+
 def list_local_tree(root: str) -> list[str]:
     """Return every file under ``root`` as a repo-relative, forward-slash path."""
     blobs: list[str] = []
@@ -289,31 +310,159 @@ def list_local_tree(root: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Plugin / marketplace detection + install steps
+#   (ported from C:\work\claude_demo\detect-repo-skills\scan_skills.py)
+# ---------------------------------------------------------------------------
+
+PLUGIN_MANIFEST = ".claude-plugin/plugin.json"
+MARKETPLACE_MANIFEST = ".claude-plugin/marketplace.json"
+
+
+def _plugin_roots_and_names(blobs: list[str], read_text) -> dict[str, str]:
+    """Map each plugin *root* dir to its plugin name.
+
+    A plugin root is the grandparent of a ``.claude-plugin/plugin.json`` file
+    (manifest lives at ``<root>/.claude-plugin/plugin.json``). The name comes from
+    the manifest's ``name`` field, falling back to the root dir's basename.
+    """
+    roots = {
+        str(PurePosixPath(p).parent.parent)
+        for p in blobs
+        if p.endswith(PLUGIN_MANIFEST)
+    }
+    names: dict[str, str] = {}
+    for root in roots:
+        manifest = PLUGIN_MANIFEST if root == "." else f"{root}/{PLUGIN_MANIFEST}"
+        name = None
+        text = read_text(manifest)
+        if text:
+            try:
+                name = json.loads(text).get("name")
+            except json.JSONDecodeError:
+                name = None
+        names[root] = name or PurePosixPath(root).name
+    return names
+
+
+def _marketplace_name(blobs: list[str], read_text) -> str | None:
+    """Return marketplace.json's top-level ``name`` (the install handle), or None.
+
+    ``/plugin install <plugin>@<handle>`` resolves ``<handle>`` against the
+    marketplace's own name, which is this top-level field.
+    """
+    if MARKETPLACE_MANIFEST not in set(blobs):
+        return None
+    text = read_text(MARKETPLACE_MANIFEST)
+    if not text:
+        return None
+    try:
+        return json.loads(text).get("name")
+    except json.JSONDecodeError:
+        return None
+
+
+def _find_owning_plugin(skill_dir: str, plugin_roots) -> str | None:
+    """Return the nearest ancestor (or self) that is a plugin root, else None."""
+    current = PurePosixPath(skill_dir)
+    while True:
+        text = str(current)
+        if text in plugin_roots:
+            return text
+        if text in (".", ""):
+            return None
+        current = current.parent
+
+
+def _install_steps(
+    skill_name: str,
+    skill_dir: str,
+    plugin_name: str | None,
+    *,
+    market_source: str,
+    market_name: str | None,
+    clone_url: str,
+    local_root: str | None,
+) -> list[str]:
+    """Return the copy-pasteable install steps for one skill.
+
+    Plugin skills install via the ``/plugin`` marketplace flow; standalone skills
+    are copied into ``~/.claude/skills`` (from a clone, or directly from disk when
+    the repo was scanned locally).
+    """
+    if plugin_name is not None:
+        return [
+            f"/plugin marketplace add {market_source}",
+            f"/plugin install {plugin_name}@{market_name or plugin_name}",
+            f"# ships with plugin '{plugin_name}'; invoke as /{plugin_name}:{skill_name}",
+        ]
+
+    src_dir = skill_dir or "."
+    if local_root:
+        # Files are already on disk; copy straight from the local repo root.
+        on_disk = (Path(local_root) / src_dir).as_posix()
+        return [
+            f"mkdir -p ~/.claude/skills/{skill_name}                 # personal scope (all projects)",
+            f'cp -r "{on_disk}" ~/.claude/skills/{skill_name}',
+            f'# OR project scope: cp -r "{on_disk}" <project>/.claude/skills/{skill_name}',
+            f"# then invoke as /{skill_name}",
+        ]
+    return [
+        f"git clone {clone_url} /tmp/repo",
+        f"mkdir -p ~/.claude/skills/{skill_name}                 # personal scope (all projects)",
+        f"cp -r /tmp/repo/{src_dir} ~/.claude/skills/{skill_name}",
+        f"# OR project scope: cp -r /tmp/repo/{src_dir} <project>/.claude/skills/{skill_name}",
+        f"# then invoke as /{skill_name}",
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Scan: build the skill records from each SKILL.md's frontmatter
 # ---------------------------------------------------------------------------
 
 def _build_skills(
     blobs: list[str],
-    read_text,           # (rel_path) -> str | None  (decoded SKILL.md contents)
+    read_text,           # (rel_path) -> str | None  (decoded file contents)
     make_url,            # (rel_path) -> str
+    install_ctx: dict,   # market_source / clone_url / local_root for install steps
 ) -> list[dict]:
     """Turn a flat file list into skill records from each ``SKILL.md``.
 
     Backend-agnostic: ``read_text`` and ``make_url`` abstract over "fetch from
     GitHub" vs. "read from disk", so the GitHub and local paths share this loop.
-    Only ``SKILL.md`` files are read — no supporting files are fetched.
+    Only ``SKILL.md`` (and the plugin/marketplace manifests) are read — no
+    supporting files are fetched. Each skill is classified as ``plugin`` or
+    ``standalone`` and stamped with copy-pasteable installation steps.
     """
     skill_md_paths = sorted(p for p in blobs if p.rsplit("/", 1)[-1] == SKILL_FILE)
+    plugin_names = _plugin_roots_and_names(blobs, read_text)
+    plugin_roots = set(plugin_names)
+    market_name = _marketplace_name(blobs, read_text)
 
     skills = []
     for md_path in skill_md_paths:
+        skill_dir = _dirname(md_path)
         skill_md_text = read_text(md_path) or ""
         fm_name, description, metadata = parse_skill_md(skill_md_text)
+        name = fm_name or _skill_name_from_path(md_path)
+
+        owning_root = _find_owning_plugin(skill_dir, plugin_roots)
+        plugin_name = plugin_names.get(owning_root) if owning_root else None
+        installation = _install_steps(
+            name, skill_dir, plugin_name,
+            market_source=install_ctx["market_source"],
+            market_name=market_name,
+            clone_url=install_ctx["clone_url"],
+            local_root=install_ctx.get("local_root"),
+        )
+
         skills.append({
-            "name": fm_name or _skill_name_from_path(md_path),
+            "name": name,
             "description": description,
             "path": md_path,
             "url": make_url(md_path),
+            "type": "plugin" if plugin_name else "standalone",
+            "plugin": plugin_name,        # None for standalone skills
+            "installation": installation,
             "metadata": _jsonsafe(metadata),
         })
 
@@ -354,7 +503,12 @@ def scan_github_repo(repo_input: str) -> dict:
     def make_url(path: str) -> str:
         return f"https://github.com/{owner}/{repo}/blob/{ref}/{path}"
 
-    skills = _build_skills(blobs, read_text, make_url)
+    install_ctx = {
+        "market_source": f"{owner}/{repo}",
+        "clone_url": f"https://github.com/{owner}/{repo}.git",
+        "local_root": None,
+    }
+    skills = _build_skills(blobs, read_text, make_url, install_ctx)
     return {
         "owner": owner,
         "repo": repo,
@@ -387,7 +541,15 @@ def scan_local_repo(repo_input: str) -> dict:
         # A file:// URI so the link opens the actual file from the browser.
         return (Path(root) / path).as_uri()
 
-    skills = _build_skills(blobs, read_text, make_url)
+    # Prefer GitHub-style install steps when the clone has a github.com origin;
+    # otherwise fall back to copying straight from the local path on disk.
+    slug = git_remote_slug(root)
+    install_ctx = {
+        "market_source": slug or root,
+        "clone_url": f"https://github.com/{slug}.git" if slug else root,
+        "local_root": root,
+    }
+    skills = _build_skills(blobs, read_text, make_url, install_ctx)
     return {
         "owner": "",
         "repo": repo,

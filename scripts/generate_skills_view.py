@@ -6,8 +6,9 @@ scanning and never touches the network. It takes the ``skills.json`` produced by
 skills and export the listing as JSON/CSV.
 
 The page is intentionally one file with no external dependencies: all styles are
-inline, so it works offline with no CDN. Each skill card carries an Expand/Collapse
-"Installation Steps" section (placeholder content for now).
+inline, so it works offline with no CDN. Each skill card shows its type (plugin vs.
+standalone) and an Expand/Collapse "Installation Steps" section driven by the
+``type``/``plugin``/``installation`` fields in ``skills.json``.
 
 Usage:
     python generate_skills_view.py --input repos/skills/skills.json
@@ -87,6 +88,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   main { padding:18px 20px 60px; }
   .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(330px, 1fr)); gap:14px; }
   .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:14px; display:flex; flex-direction:column; gap:8px; }
+  .card-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
   .card h2 { margin:0; font-size:16px; }
   .card .desc { color:var(--fg); font-size:13px; line-height:1.45; }
   .card .path { color:var(--muted); font-size:12px; word-break:break-all; }
@@ -97,7 +99,12 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   details { font-size:12px; color:var(--muted); }
   details summary { cursor:pointer; }
   details ul { margin:6px 0 0; padding-left:18px; }
-  .install-steps { margin:6px 0 0; color:var(--muted); }
+  .install-type { margin:8px 0 4px; font-size:12px; color:var(--muted); }
+  .install-type b { color:var(--fg); font-weight:600; }
+  pre.install-steps { margin:4px 0 0; padding:9px 11px; background:#0d1117; border:1px solid var(--border); border-radius:6px; overflow-x:auto; font-size:12px; line-height:1.5; color:var(--fg); white-space:pre; font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
+  .type-badge { font-size:11px; border-radius:999px; padding:1px 8px; border:1px solid var(--border); white-space:nowrap; }
+  .type-badge.plugin { background:#8957e522; border-color:#8957e5; color:#a371f7; }
+  .type-badge.standalone { background:#23863622; border-color:var(--accent2); color:#3fb950; }
   .empty { color:var(--muted); padding:40px; text-align:center; }
 </style>
 </head>
@@ -115,7 +122,6 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
       <select id="sort">
         <option value="name-asc">Name (A→Z)</option>
         <option value="name-desc">Name (Z→A)</option>
-        <option value="path-asc">Path (A→Z)</option>
       </select>
     </label>
     <label class="ctrl">Per page
@@ -189,7 +195,8 @@ const META_HIDDEN = new Set(["license", "allowed-tools", "allowed_tools", "argum
 
 // Flatten a skill to one lowercase string for substring filtering.
 function haystack(s) {
-  const parts = [s.name, s.description, s.path, s.repo || "", s.source || "", JSON.stringify(s.metadata || {})];
+  const parts = [s.name, s.description, s.path, s.repo || "", s.source || "",
+                 s.type || "", s.plugin || "", JSON.stringify(s.metadata || {})];
   return parts.join("  ").toLowerCase();
 }
 DATA.skills.forEach(s => { s._hay = haystack(s); });
@@ -205,16 +212,29 @@ function metaTags(md) {
   return tags.length ? '<div class="tags">' + tags.join("") + "</div>" : "";
 }
 
-// Expand/Collapse section reserved for per-skill installation steps.
-// Content is a placeholder for now; real steps will be filled in later.
+// Expand/Collapse section showing how to install the skill: a type line
+// (plugin vs. standalone) followed by the copy-pasteable steps from skills.json.
 function installSteps(s) {
+  const steps = Array.isArray(s.installation) ? s.installation : [];
+  const typeLine = s.type === "plugin"
+    ? "<b>Plugin skill</b>" + (s.plugin ? " — ships with plugin <b>" + esc(s.plugin) + "</b>" : "")
+    : "<b>Standalone skill</b>";
+  const body = steps.length
+    ? '<pre class="install-steps">' + steps.map(esc).join("\n") + "</pre>"
+    : '<p class="install-type">No installation steps available.</p>';
   return "<details><summary>Installation Steps</summary>" +
-    '<p class="install-steps">Installation steps coming soon.</p></details>';
+    '<div class="install-type">' + typeLine + "</div>" + body + "</details>";
+}
+
+// Small pill showing the skill's type at a glance, above the card body.
+function typeBadge(s) {
+  if (!s.type) return "";
+  return '<span class="type-badge ' + esc(s.type) + '">' + esc(s.type) + "</span>";
 }
 
 function card(s, i) {
   return '<div class="card">' +
-    "<h2>" + esc(s.name) + "</h2>" +
+    '<div class="card-head"><h2>' + esc(s.name) + "</h2>" + typeBadge(s) + "</div>" +
     (s.repo ? '<span class="repo-badge" data-repo="' + esc(s.repo) + '">' + esc(s.repo) + "</span>" : "") +
     (s.description ? '<div class="desc">' + esc(s.description) + "</div>" : "") +
     '<div class="path"><a href="' + esc(s.url) + '" target="_blank" rel="noopener">' + esc(s.path) + "</a></div>" +
@@ -243,7 +263,6 @@ let page = 1;  // 1-based; reset to 1 whenever the matched set changes.
 const SORTERS = {
   "name-asc":   (a, b) => a.s.name.toLowerCase().localeCompare(b.s.name.toLowerCase()),
   "name-desc":  (a, b) => b.s.name.toLowerCase().localeCompare(a.s.name.toLowerCase()),
-  "path-asc":   (a, b) => a.s.path.toLowerCase().localeCompare(b.s.path.toLowerCase()),
 };
 
 function matched() {
