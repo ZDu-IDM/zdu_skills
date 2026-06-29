@@ -87,10 +87,15 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   .pager { display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:center; margin-top:18px; color:var(--muted); font-size:13px; }
   main { padding:18px 20px 60px; }
   .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(330px, 1fr)); gap:14px; }
-  .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:14px; display:flex; flex-direction:column; gap:8px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:14px; display:flex; flex-direction:column; gap:8px; transition:border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+  .card:hover { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent), 0 8px 22px rgba(0,0,0,.45); transform:translateY(-2px); }
   .card-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
   .card h2 { margin:0; font-size:16px; }
+  .card h2 a { color:var(--fg); text-decoration:none; transition:color .12s ease; }
+  .card h2 a:hover, .card h2 a:focus-visible { color:var(--accent); text-decoration:underline; outline:none; }
   .card .desc { color:var(--fg); font-size:13px; line-height:1.45; }
+  .desc-toggle { background:none; border:none; padding:0 0 0 4px; margin:0; color:var(--accent); cursor:pointer; font-size:13px; }
+  .desc-toggle:hover { text-decoration:underline; border-color:transparent; }
   .card .path { color:var(--muted); font-size:12px; word-break:break-all; }
   .card .path a { color:var(--accent); text-decoration:none; }
   .tags { display:flex; flex-wrap:wrap; gap:5px; }
@@ -232,11 +237,38 @@ function typeBadge(s) {
   return '<span class="type-badge ' + esc(s.type) + '">' + esc(s.type) + "</span>";
 }
 
+// Descriptions longer than this are clamped, with a "…more" toggle to reveal the
+// rest. The full text lives in data-full so search/CSV still see everything.
+const DESC_LIMIT = 400;
+function descHtml(s) {
+  const full = s.description || "";
+  if (!full) return "";
+  if (full.length <= DESC_LIMIT) return '<div class="desc">' + esc(full) + "</div>";
+  const short = full.slice(0, DESC_LIMIT).replace(/\s+$/, "");
+  return '<div class="desc" data-full="' + esc(full) + '">' +
+    '<span class="desc-text">' + esc(short) + "</span>" +
+    '<button type="button" class="desc-toggle" data-expanded="0">…more</button></div>';
+}
+
+// Turn a SKILL.md file URL into its containing *folder* URL: drop the trailing
+// filename, and (for GitHub) swap the file-view "/blob/" for the dir-view "/tree/".
+function folderUrl(s) {
+  if (!s.url) return "";
+  return s.url.replace(/\/[^\/]*$/, "").replace("/blob/", "/tree/");
+}
+
 function card(s, i) {
+  // The skill name links to its source folder on GitHub (the skill directory,
+  // not the SKILL.md file). Local scans expose a file:// folder URL instead;
+  // fall back to plain text when no URL is available.
+  const dirUrl = folderUrl(s);
+  const nameHtml = dirUrl
+    ? '<a href="' + esc(dirUrl) + '" target="_blank" rel="noopener" title="Open ' + esc(s.name) + ' skill folder on GitHub">' + esc(s.name) + "</a>"
+    : esc(s.name);
   return '<div class="card">' +
-    '<div class="card-head"><h2>' + esc(s.name) + "</h2>" + typeBadge(s) + "</div>" +
+    '<div class="card-head"><h2>' + nameHtml + "</h2>" + typeBadge(s) + "</div>" +
     (s.repo ? '<span class="repo-badge" data-repo="' + esc(s.repo) + '">' + esc(s.repo) + "</span>" : "") +
-    (s.description ? '<div class="desc">' + esc(s.description) + "</div>" : "") +
+    descHtml(s) +
     '<div class="path"><a href="' + esc(s.url) + '" target="_blank" rel="noopener">' + esc(s.path) + "</a></div>" +
     metaTags(s.metadata) +
     installSteps(s) +
@@ -345,6 +377,22 @@ nextEl.addEventListener("click", () => { page++; render(); window.scrollTo(0, 0)
 document.getElementById("exportJson").addEventListener("click", exportJson);
 document.getElementById("exportCsv").addEventListener("click", exportCsv);
 grid.addEventListener("click", e => {
+  // Expand/collapse a clamped description.
+  const toggle = e.target.closest(".desc-toggle");
+  if (toggle) {
+    const wrap = toggle.closest(".desc");
+    const textEl = wrap.querySelector(".desc-text");
+    if (toggle.dataset.expanded === "1") {
+      textEl.textContent = wrap.dataset.full.slice(0, DESC_LIMIT).replace(/\s+$/, "");
+      toggle.textContent = "…more";
+      toggle.dataset.expanded = "0";
+    } else {
+      textEl.textContent = wrap.dataset.full;
+      toggle.textContent = " show less";
+      toggle.dataset.expanded = "1";
+    }
+    return;
+  }
   // Clicking a repo badge (aggregate view) filters down to that repo.
   const badge = e.target.closest(".repo-badge[data-repo]");
   if (badge && DATA.aggregate && repoFilterEl) {
