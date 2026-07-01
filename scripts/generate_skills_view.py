@@ -75,12 +75,19 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     --accent:#2f81f7; --accent2:#238636;
     --tag-bg:#21262d; --code-bg:#0d1117; --code-fg:#e6edf3;
     --warn:#d29922; --shadow:rgba(0,0,0,.45);
+    /* Roles split out from --accent so dark mode can be brighter/more varied:
+       links (repo name + SKILL.md), the card hover edge, and the repo badge. */
+    --link:#79c0ff; --card-glow:#7d8cff;
+    --badge-bg:#2ea88418; --badge-border:#5ed3b3; --badge-fg:#86e6cb;
   }
   [data-theme="light"] {
     --bg:#f4f5f7; --card:#ffffff; --border:#dfe2e8; --fg:#20242e; --muted:#69707c;
     --accent:#5257e8; --accent2:#1f8a45;
     --tag-bg:#eef0f3; --code-bg:#1c2333; --code-fg:#e6edf3;
     --warn:#9a6700; --shadow:rgba(60,66,87,.12);
+    /* Light mode keeps the original indigo look for these roles. */
+    --link:#5257e8; --card-glow:#5257e8;
+    --badge-bg:#5257e814; --badge-border:#5257e8; --badge-fg:#5257e8;
   }
   * { box-sizing: border-box; }
   body { margin:0; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background:var(--bg); color:var(--fg); transition:background .2s ease, color .2s ease; }
@@ -102,19 +109,19 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   main { padding:18px 20px 60px; }
   .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(330px, 1fr)); gap:14px; }
   .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:14px; display:flex; flex-direction:column; gap:8px; transition:border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
-  .card:hover { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent), 0 8px 22px var(--shadow); transform:translateY(-2px); }
+  .card:hover { border-color:var(--card-glow); box-shadow:0 0 0 1px var(--card-glow), 0 8px 22px var(--shadow); transform:translateY(-2px); }
   .card-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
   .card h2 { margin:0; font-size:16px; }
   .card h2 a { color:var(--fg); text-decoration:none; transition:color .12s ease; }
-  .card h2 a:hover, .card h2 a:focus-visible { color:var(--accent); text-decoration:underline; outline:none; }
+  .card h2 a:hover, .card h2 a:focus-visible { color:var(--link); text-decoration:underline; outline:none; }
   .card .desc { color:var(--fg); font-size:13px; line-height:1.45; }
-  .desc-toggle { background:none; border:none; padding:0 0 0 4px; margin:0; color:var(--accent); cursor:pointer; font-size:13px; }
+  .desc-toggle { background:none; border:none; padding:0 0 0 4px; margin:0; color:var(--link); cursor:pointer; font-size:13px; }
   .desc-toggle:hover { text-decoration:underline; border-color:transparent; }
   .card .path { color:var(--muted); font-size:12px; word-break:break-all; }
-  .card .path a { color:var(--accent); text-decoration:none; }
+  .card .path a { color:var(--link); text-decoration:none; }
   .tags { display:flex; flex-wrap:wrap; gap:5px; }
   .tag { font-size:11px; background:var(--tag-bg); border:1px solid var(--border); border-radius:999px; padding:2px 8px; color:var(--muted); }
-  .repo-badge { font-size:11px; background:#1f6feb22; border:1px solid var(--accent); border-radius:999px; padding:2px 8px; color:var(--accent); align-self:flex-start; }
+  .repo-badge { font-size:11px; background:var(--badge-bg); border:1px solid var(--badge-border); border-radius:999px; padding:2px 8px; color:var(--badge-fg); align-self:flex-start; }
   details { font-size:12px; color:var(--muted); }
   details summary { cursor:pointer; }
   details ul { margin:6px 0 0; padding-left:18px; }
@@ -157,10 +164,18 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   .modal-close { background:none; border:none; color:var(--accent); font-size:24px; line-height:1; cursor:pointer; padding:0 2px; }
   .modal .badges { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:12px 0; color:var(--muted); font-size:13px; }
   .modal .modal-desc { font-size:14px; line-height:1.55; color:var(--fg); white-space:pre-wrap; }
+  .modal .path a { color:var(--link); text-decoration:none; }
+  .modal .path a:hover { text-decoration:underline; }
   .modal .steps-head { display:flex; align-items:center; justify-content:space-between; margin:20px 0 8px; }
   .modal .steps-head h3 { margin:0; font-size:16px; }
   .copy-btn { background:none; border:none; color:var(--accent); cursor:pointer; font-size:14px; padding:0; }
   .copy-btn:hover { text-decoration:underline; }
+  /* Export: one button that reveals JSON / CSV on hover or click. */
+  .export-menu { position:relative; display:inline-flex; }
+  .export-options { position:absolute; top:100%; left:0; min-width:100%; margin-top:2px; padding:4px; background:var(--card); border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 22px var(--shadow); flex-direction:column; gap:2px; display:none; z-index:10; }
+  .export-menu:hover .export-options, .export-menu.open .export-options { display:flex; }
+  .export-options button { border:none; background:none; width:100%; text-align:left; border-radius:6px; padding:6px 12px; }
+  .export-options button:hover { background:var(--tag-bg); border-color:transparent; }
 </style>
 <script>
   /* Apply the saved (or OS-preferred) theme before first paint to avoid a flash
@@ -205,8 +220,13 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
         <option value="all">All</option>
       </select>
     </label>
-    <button id="exportJson">Export JSON</button>
-    <button id="exportCsv">Export CSV</button>
+    <span class="export-menu" id="exportMenu">
+      <button id="exportBtn" type="button" aria-haspopup="true" aria-expanded="false">Export ▾</button>
+      <div class="export-options" id="exportOptions" role="menu">
+        <button id="exportJson" type="button" role="menuitem">JSON</button>
+        <button id="exportCsv" type="button" role="menuitem">CSV</button>
+      </div>
+    </span>
     <button id="themeToggle" type="button" title="Toggle day / night mode" aria-label="Toggle day / night mode"></button>
     <span class="count" id="count"></span>
   </div>
@@ -571,6 +591,20 @@ prevEl.addEventListener("click", () => { if (page > 1) { page--; render(); windo
 nextEl.addEventListener("click", () => { page++; render(); window.scrollTo(0, 0); });
 document.getElementById("exportJson").addEventListener("click", exportJson);
 document.getElementById("exportCsv").addEventListener("click", exportCsv);
+
+// Export dropdown: click toggles it open (for touch/keyboard); CSS handles hover.
+// An option click, or any click elsewhere, bubbles to document and closes it.
+const exportMenu = document.getElementById("exportMenu");
+const exportBtn = document.getElementById("exportBtn");
+exportBtn.addEventListener("click", e => {
+  e.stopPropagation();
+  const open = exportMenu.classList.toggle("open");
+  exportBtn.setAttribute("aria-expanded", open ? "true" : "false");
+});
+document.addEventListener("click", () => {
+  exportMenu.classList.remove("open");
+  exportBtn.setAttribute("aria-expanded", "false");
+});
 
 /* ---- day / night theme toggle ------------------------------------------- */
 // The head script already applied the initial theme; here we just label the
