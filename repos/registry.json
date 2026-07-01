@@ -29,13 +29,22 @@
       "last_scanned_at": "2026-06-29T14:47:34Z"
     },
     {
+      "added_at": "2026-06-30T15:31:24Z",
+      "name": "starsim_ai",
+      "input": "https://github.com/starsimhub/starsim_ai",
+      "source": "starsimhub/starsim_ai",
+      "local": false,
+      "ref": "main",
+      "last_scanned_at": "2026-06-30T15:31:24Z"
+    },
+    {
       "added_at": "2026-06-24T17:30:27Z",
       "name": "zdu_skills",
-      "input": "C:\\work\\AI\\zdu_skills",
-      "source": "C:\\work\\AI\\zdu_skills",
-      "local": true,
-      "ref": "local clone",
-      "last_scanned_at": "2026-06-29T14:47:34Z"
+      "input": "https://github.com/ZDu-IDM/zdu_skills",
+      "source": "ZDu-IDM/zdu_skills",
+      "local": false,
+      "ref": "main",
+      "last_scanned_at": "2026-06-30T18:05:42Z"
     }
   ]
 }
