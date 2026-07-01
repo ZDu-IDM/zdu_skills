@@ -126,6 +126,41 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   .type-badge.standalone { background:#23863622; border-color:var(--accent2); color:#3fb950; }
   .empty { color:var(--muted); padding:40px; text-align:center; }
   #themeToggle { display:inline-flex; align-items:center; gap:5px; }
+  /* View toggle: a small segmented control (Table | Cards). */
+  .viewtoggle { display:inline-flex; }
+  .viewtoggle .viewbtn { border-radius:0; }
+  .viewtoggle .viewbtn:first-child { border-radius:8px 0 0 8px; }
+  .viewtoggle .viewbtn:last-child { border-radius:0 8px 8px 0; border-left:none; }
+  .viewbtn.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .viewbtn.active:hover { border-color:var(--accent); }
+  /* Table view */
+  .table-wrap { overflow-x:auto; }
+  table.skills-table { width:100%; border-collapse:collapse; font-size:13px; }
+  .skills-table th { text-align:left; padding:10px 12px; color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.03em; border-bottom:1px solid var(--border); white-space:nowrap; }
+  .skills-table th[data-sort] { cursor:pointer; user-select:none; }
+  .skills-table th[data-sort]:hover { color:var(--fg); }
+  .sort-ind { font-size:10px; margin-left:4px; }
+  .skills-table td { padding:12px; border-bottom:1px solid var(--border); vertical-align:middle; }
+  .skills-table tbody tr { cursor:pointer; transition:background .12s ease; }
+  .skills-table tbody tr:hover { background:var(--tag-bg); }
+  .skills-table td.name { font-weight:600; color:var(--fg); }
+  .skills-table td.repo { color:var(--muted); }
+  /* Modal (opened when a table row is clicked) */
+  .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.5); display:none; align-items:flex-start; justify-content:center; z-index:50; padding:40px 16px; overflow-y:auto; }
+  .modal-backdrop.open { display:flex; }
+  body.modal-open { overflow:hidden; }
+  .modal { background:var(--card); border:1px solid var(--border); border-radius:12px; max-width:640px; width:100%; padding:22px 24px; box-shadow:0 12px 40px var(--shadow); }
+  .modal-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+  .modal-head h2 { margin:0; font-size:22px; }
+  .modal-head h2 a { color:var(--fg); text-decoration:none; }
+  .modal-head h2 a:hover { color:var(--accent); text-decoration:underline; }
+  .modal-close { background:none; border:none; color:var(--accent); font-size:24px; line-height:1; cursor:pointer; padding:0 2px; }
+  .modal .badges { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:12px 0; color:var(--muted); font-size:13px; }
+  .modal .modal-desc { font-size:14px; line-height:1.55; color:var(--fg); white-space:pre-wrap; }
+  .modal .steps-head { display:flex; align-items:center; justify-content:space-between; margin:20px 0 8px; }
+  .modal .steps-head h3 { margin:0; font-size:16px; }
+  .copy-btn { background:none; border:none; color:var(--accent); cursor:pointer; font-size:14px; padding:0; }
+  .copy-btn:hover { text-decoration:underline; }
 </style>
 <script>
   /* Apply the saved (or OS-preferred) theme before first paint to avoid a flash
@@ -147,6 +182,10 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   <div class="meta" id="subtitle"></div>
   <div class="warn" id="truncated" style="display:none"></div>
   <div class="toolbar">
+    <span class="viewtoggle">
+      <button id="viewTable" class="viewbtn" type="button">☰ Table</button>
+      <button id="viewCards" class="viewbtn" type="button">▦ Cards</button>
+    </span>
     <input type="search" id="filter" placeholder="Filter by name, description, path, metadata, or file…" autofocus>
     <label class="ctrl" id="repoFilterWrap" style="display:none">Repo
       <select id="repoFilter"><option value="">All repos</option></select>
@@ -174,6 +213,12 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 </header>
 <main>
   <div class="grid" id="grid"></div>
+  <div class="table-wrap" id="tableWrap" style="display:none">
+    <table class="skills-table">
+      <thead><tr id="tableHead"></tr></thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+  </div>
   <div class="empty" id="empty" style="display:none">No skills match your filter.</div>
   <div class="pager" id="pager" style="display:none">
     <button id="prev">‹ Prev</button>
@@ -181,6 +226,10 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     <button id="next">Next ›</button>
   </div>
 </main>
+
+<div class="modal-backdrop" id="modal" role="dialog" aria-modal="true" aria-hidden="true">
+  <div class="modal" id="modalPanel"></div>
+</div>
 
 <script type="application/json" id="data">__DATA__</script>
 <script>
@@ -223,6 +272,10 @@ function exportCsv() {
 /* ---- rendering ---------------------------------------------------------- */
 const esc = s => String(s).replace(/[&<>"']/g, c =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+// Full "owner/repo" label: repos can come from different owners, so the short
+// repo name alone can collide. Falls back to the short name for local scans.
+const repoLabel = s => s.source || s.repo || "";
 
 // Frontmatter keys we never surface as tags (kept out of the page on purpose).
 const META_HIDDEN = new Set(["license", "allowed-tools", "allowed_tools", "argument-hint", "argument_hint"]);
@@ -296,7 +349,7 @@ function card(s, i) {
     : esc(s.name);
   return '<div class="card">' +
     '<div class="card-head"><h2>' + nameHtml + "</h2>" + typeBadge(s) + "</div>" +
-    (s.repo ? '<span class="repo-badge" data-repo="' + esc(s.repo) + '">' + esc(s.repo) + "</span>" : "") +
+    (s.repo ? '<span class="repo-badge" data-source="' + esc(repoLabel(s)) + '">' + esc(repoLabel(s)) + "</span>" : "") +
     descHtml(s) +
     '<div class="path"><a href="' + esc(s.url) + '" target="_blank" rel="noopener">' + esc(s.path) + "</a></div>" +
     metaTags(s.metadata) +
@@ -316,8 +369,18 @@ const pagerEl = document.getElementById("pager");
 const pageInfoEl = document.getElementById("pageInfo");
 const prevEl = document.getElementById("prev");
 const nextEl = document.getElementById("next");
+const tableWrap = document.getElementById("tableWrap");
+const tableHead = document.getElementById("tableHead");
+const tableBody = document.getElementById("tableBody");
+const viewTableBtn = document.getElementById("viewTable");
+const viewCardsBtn = document.getElementById("viewCards");
+const modalEl = document.getElementById("modal");
+const modalPanel = document.getElementById("modalPanel");
 
 let page = 1;  // 1-based; reset to 1 whenever the matched set changes.
+// Cards is the default view; a saved choice (or last click) overrides it.
+let view = "cards";
+try { const v = localStorage.getItem("skills-view"); if (v === "table" || v === "cards") view = v; } catch (e) { /* ignore */ }
 
 // Comparators keyed by the Sort dropdown's value. Each pair is {s, i} where
 // i is the original index into DATA.skills.
@@ -332,7 +395,7 @@ function matched() {
   const repo = repoFilterEl ? repoFilterEl.value : "";
   const list = DATA.skills
     .map((s, i) => ({ s, i }))
-    .filter(({ s }) => (!repo || s.repo === repo) && terms.every(t => s._hay.includes(t)));
+    .filter(({ s }) => (!repo || repoLabel(s) === repo) && terms.every(t => s._hay.includes(t)));
   list.sort(SORTERS[sortEl.value] || SORTERS["name-asc"]);
   return list;
 }
@@ -345,7 +408,16 @@ function render() {
   const start = (page - 1) * per;
   const slice = list.slice(start, start + per);
 
-  grid.innerHTML = slice.map(({ s, i }) => card(s, i)).join("");
+  // Same filtered/sorted/paginated slice, rendered as cards or a table row set.
+  if (view === "table") {
+    grid.style.display = "none";
+    tableWrap.style.display = list.length ? "block" : "none";
+    renderTable(slice);
+  } else {
+    tableWrap.style.display = "none";
+    grid.style.display = "grid";
+    grid.innerHTML = slice.map(({ s, i }) => card(s, i)).join("");
+  }
   emptyEl.style.display = list.length ? "none" : "block";
   countEl.textContent = list.length + " of " + DATA.skills.length + " skill(s)";
 
@@ -364,6 +436,99 @@ function render() {
 // Changing the filter, sort, or page size returns the user to page 1.
 function resetAndRender() { page = 1; render(); }
 
+/* ---- table view -------------------------------------------------------- */
+// Columns: Name (sortable) · Type · Repository (only when aggregating repos,
+// where the value actually varies). Each row carries data-idx into DATA.skills
+// so a click can open the detail modal.
+function renderTable(slice) {
+  const dir = sortEl.value === "name-desc" ? "▼" : "▲";
+  tableHead.innerHTML =
+    '<th data-sort="name">Name <span class="sort-ind">' + dir + "</span></th>" +
+    "<th>Type</th>" +
+    (DATA.aggregate ? "<th>Repository</th>" : "");
+  tableBody.innerHTML = slice.map(({ s, i }) =>
+    '<tr data-idx="' + i + '">' +
+      '<td class="name">' + esc(s.name) + "</td>" +
+      "<td>" + typeBadge(s) + "</td>" +
+      (DATA.aggregate ? '<td class="repo">' + esc(repoLabel(s)) + "</td>" : "") +
+    "</tr>"
+  ).join("");
+}
+
+/* ---- detail modal ------------------------------------------------------ */
+function copyText(text, btn) {
+  const done = () => { btn.textContent = "Copied!"; setTimeout(() => { btn.textContent = "Copy"; }, 1500); };
+  const fail = () => { btn.textContent = "Copy failed"; setTimeout(() => { btn.textContent = "Copy"; }, 1500); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text, done, fail));
+  } else {
+    fallbackCopy(text, done, fail);
+  }
+}
+// file:// pages often can't use the async clipboard API; fall back to a hidden
+// textarea + execCommand so Copy still works when opened straight from disk.
+function fallbackCopy(text, done, fail) {
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    ok ? done() : fail();
+  } catch (e) { fail(); }
+}
+
+function openModal(idx) {
+  const s = DATA.skills[idx];
+  if (!s) return;
+  const dirUrl = folderUrl(s);
+  const nameHtml = dirUrl
+    ? '<a href="' + esc(dirUrl) + '" target="_blank" rel="noopener">' + esc(s.name) + "</a>"
+    : esc(s.name);
+  const pluginTxt = (s.type === "plugin" && s.plugin)
+    ? "<span>plugin: " + esc(s.plugin) + "</span>" : "";
+  const steps = Array.isArray(s.installation) ? s.installation : [];
+  const stepsBlock = steps.length
+    ? '<div class="steps-head"><h3>Installation steps</h3>' +
+        '<button type="button" class="copy-btn" id="copySteps">Copy</button></div>' +
+        '<pre class="install-steps">' + steps.map(esc).join("\n") + "</pre>"
+    : "";
+  const pathBlock = s.url
+    ? '<div class="path" style="margin-top:14px"><a href="' + esc(s.url) +
+        '" target="_blank" rel="noopener">' + esc(s.path) + "</a></div>"
+    : '<div class="path" style="margin-top:14px">' + esc(s.path || "") + "</div>";
+
+  modalPanel.innerHTML =
+    '<div class="modal-head"><h2>' + nameHtml + "</h2>" +
+      '<button type="button" class="modal-close" id="modalClose" aria-label="Close">×</button></div>' +
+    '<div class="badges">' + typeBadge(s) + pluginTxt +
+      (s.repo ? '<span class="repo-badge">' + esc(repoLabel(s)) + "</span>" : "") + "</div>" +
+    '<div class="modal-desc">' + esc(s.description || "") + "</div>" +
+    pathBlock + stepsBlock;
+
+  modalEl.classList.add("open");
+  modalEl.setAttribute("aria-hidden", "false");
+  document.body.classList.add("modal-open");
+
+  document.getElementById("modalClose").addEventListener("click", closeModal);
+  const copyBtn = document.getElementById("copySteps");
+  if (copyBtn) copyBtn.addEventListener("click", () => copyText(steps.join("\n"), copyBtn));
+}
+
+function closeModal() {
+  modalEl.classList.remove("open");
+  modalEl.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("modal-open");
+}
+
+/* ---- view switch ------------------------------------------------------- */
+function applyView(v) {
+  view = v;
+  viewTableBtn.classList.toggle("active", v === "table");
+  viewCardsBtn.classList.toggle("active", v === "cards");
+  render();
+}
+
 /* ---- wire up ------------------------------------------------------------ */
 if (DATA.aggregate) {
   // Combined view across many registered repos.
@@ -373,10 +538,11 @@ if (DATA.aggregate) {
     DATA.count + " skill(s) across " + repos.length + " repo(s)";
   // Populate and reveal the repo filter, sorted by repo name.
   repoFilterWrap.style.display = "flex";
-  for (const r of repos.slice().sort((a, b) => a.repo.toLowerCase().localeCompare(b.repo.toLowerCase()))) {
+  const repoName = r => r.source || r.repo || "";
+  for (const r of repos.slice().sort((a, b) => repoName(a).toLowerCase().localeCompare(repoName(b).toLowerCase()))) {
     const opt = document.createElement("option");
-    opt.value = r.repo;
-    opt.textContent = r.repo + " (" + r.count + ")";
+    opt.value = repoName(r);
+    opt.textContent = repoName(r) + " (" + r.count + ")";
     repoFilterEl.appendChild(opt);
   }
   repoFilterEl.addEventListener("change", resetAndRender);
@@ -440,13 +606,33 @@ grid.addEventListener("click", e => {
     return;
   }
   // Clicking a repo badge (aggregate view) filters down to that repo.
-  const badge = e.target.closest(".repo-badge[data-repo]");
+  const badge = e.target.closest(".repo-badge[data-source]");
   if (badge && DATA.aggregate && repoFilterEl) {
-    repoFilterEl.value = badge.dataset.repo;
+    repoFilterEl.value = badge.dataset.source;
     resetAndRender();
   }
 });
-render();
+
+/* ---- table + modal + view-toggle events -------------------------------- */
+viewTableBtn.addEventListener("click", () => { applyView("table"); try { localStorage.setItem("skills-view", "table"); } catch (e) {} });
+viewCardsBtn.addEventListener("click", () => { applyView("cards"); try { localStorage.setItem("skills-view", "cards"); } catch (e) {} });
+// Clicking the Name header toggles the shared sort order (asc <-> desc).
+tableHead.addEventListener("click", e => {
+  if (!e.target.closest("th[data-sort]")) return;
+  sortEl.value = sortEl.value === "name-asc" ? "name-desc" : "name-asc";
+  render();
+});
+// A row click opens the detail modal (ignore clicks on links inside the row).
+tableBody.addEventListener("click", e => {
+  if (e.target.closest("a")) return;
+  const tr = e.target.closest("tr[data-idx]");
+  if (tr) openModal(parseInt(tr.dataset.idx, 10));
+});
+// Close the modal by clicking the backdrop or pressing Escape.
+modalEl.addEventListener("click", e => { if (e.target === modalEl) closeModal(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && modalEl.classList.contains("open")) closeModal(); });
+
+applyView(view);  // sets the toggle's active button and does the first render
 </script>
 </body>
 </html>
