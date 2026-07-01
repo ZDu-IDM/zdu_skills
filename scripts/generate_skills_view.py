@@ -67,14 +67,28 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__TITLE__</title>
 <style>
-  :root { --bg:#0d1117; --card:#161b22; --border:#30363d; --fg:#e6edf3; --muted:#8b949e; --accent:#2f81f7; --accent2:#238636; }
+  /* Dark theme is the default; the light palette below overrides these when
+     <html data-theme="light"> is set. Every color routes through a variable so
+     switching themes is just swapping this block of values. */
+  :root {
+    --bg:#0d1117; --card:#161b22; --border:#30363d; --fg:#e6edf3; --muted:#8b949e;
+    --accent:#2f81f7; --accent2:#238636;
+    --tag-bg:#21262d; --code-bg:#0d1117; --code-fg:#e6edf3;
+    --warn:#d29922; --shadow:rgba(0,0,0,.45);
+  }
+  [data-theme="light"] {
+    --bg:#f4f5f7; --card:#ffffff; --border:#dfe2e8; --fg:#20242e; --muted:#69707c;
+    --accent:#5257e8; --accent2:#1f8a45;
+    --tag-bg:#eef0f3; --code-bg:#1c2333; --code-fg:#e6edf3;
+    --warn:#9a6700; --shadow:rgba(60,66,87,.12);
+  }
   * { box-sizing: border-box; }
-  body { margin:0; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background:var(--bg); color:var(--fg); }
+  body { margin:0; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background:var(--bg); color:var(--fg); transition:background .2s ease, color .2s ease; }
   header { padding:24px 20px 12px; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--bg); z-index:5; }
   h1 { margin:0 0 4px; font-size:20px; }
   h1 a { color:var(--accent); text-decoration:none; }
   .meta { color:var(--muted); font-size:13px; }
-  .warn { color:#d29922; font-size:13px; margin-top:6px; }
+  .warn { color:var(--warn); font-size:13px; margin-top:6px; }
   .toolbar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:14px; }
   input[type=search] { flex:1 1 280px; min-width:200px; padding:9px 12px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--fg); font-size:14px; }
   button { padding:8px 13px; border-radius:8px; border:1px solid var(--border); background:var(--card); color:var(--fg); font-size:13px; cursor:pointer; }
@@ -88,7 +102,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   main { padding:18px 20px 60px; }
   .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(330px, 1fr)); gap:14px; }
   .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:14px; display:flex; flex-direction:column; gap:8px; transition:border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
-  .card:hover { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent), 0 8px 22px rgba(0,0,0,.45); transform:translateY(-2px); }
+  .card:hover { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent), 0 8px 22px var(--shadow); transform:translateY(-2px); }
   .card-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
   .card h2 { margin:0; font-size:16px; }
   .card h2 a { color:var(--fg); text-decoration:none; transition:color .12s ease; }
@@ -99,19 +113,33 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   .card .path { color:var(--muted); font-size:12px; word-break:break-all; }
   .card .path a { color:var(--accent); text-decoration:none; }
   .tags { display:flex; flex-wrap:wrap; gap:5px; }
-  .tag { font-size:11px; background:#21262d; border:1px solid var(--border); border-radius:999px; padding:2px 8px; color:var(--muted); }
+  .tag { font-size:11px; background:var(--tag-bg); border:1px solid var(--border); border-radius:999px; padding:2px 8px; color:var(--muted); }
   .repo-badge { font-size:11px; background:#1f6feb22; border:1px solid var(--accent); border-radius:999px; padding:2px 8px; color:var(--accent); align-self:flex-start; }
   details { font-size:12px; color:var(--muted); }
   details summary { cursor:pointer; }
   details ul { margin:6px 0 0; padding-left:18px; }
   .install-type { margin:8px 0 4px; font-size:12px; color:var(--muted); }
   .install-type b { color:var(--fg); font-weight:600; }
-  pre.install-steps { margin:4px 0 0; padding:9px 11px; background:#0d1117; border:1px solid var(--border); border-radius:6px; overflow-x:auto; font-size:12px; line-height:1.5; color:var(--fg); white-space:pre; font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
+  pre.install-steps { margin:4px 0 0; padding:9px 11px; background:var(--code-bg); border:1px solid var(--border); border-radius:6px; overflow-x:auto; font-size:12px; line-height:1.5; color:var(--code-fg); white-space:pre; font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
   .type-badge { font-size:11px; border-radius:999px; padding:1px 8px; border:1px solid var(--border); white-space:nowrap; }
   .type-badge.plugin { background:#8957e522; border-color:#8957e5; color:#a371f7; }
   .type-badge.standalone { background:#23863622; border-color:var(--accent2); color:#3fb950; }
   .empty { color:var(--muted); padding:40px; text-align:center; }
+  #themeToggle { display:inline-flex; align-items:center; gap:5px; }
 </style>
+<script>
+  /* Apply the saved (or OS-preferred) theme before first paint to avoid a flash
+     of the wrong theme. The toggle handler further down keeps it in sync. */
+  (function () {
+    try {
+      var t = localStorage.getItem("skills-theme");
+      if (t !== "light" && t !== "dark") {
+        t = (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) ? "light" : "dark";
+      }
+      document.documentElement.setAttribute("data-theme", t);
+    } catch (e) { /* localStorage blocked -> fall back to CSS default (dark) */ }
+  })();
+</script>
 </head>
 <body>
 <header>
@@ -140,6 +168,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     </label>
     <button id="exportJson">Export JSON</button>
     <button id="exportCsv">Export CSV</button>
+    <button id="themeToggle" type="button" title="Toggle day / night mode" aria-label="Toggle day / night mode"></button>
     <span class="count" id="count"></span>
   </div>
 </header>
@@ -376,6 +405,23 @@ prevEl.addEventListener("click", () => { if (page > 1) { page--; render(); windo
 nextEl.addEventListener("click", () => { page++; render(); window.scrollTo(0, 0); });
 document.getElementById("exportJson").addEventListener("click", exportJson);
 document.getElementById("exportCsv").addEventListener("click", exportCsv);
+
+/* ---- day / night theme toggle ------------------------------------------- */
+// The head script already applied the initial theme; here we just label the
+// button to match and let clicks flip + persist the choice.
+const themeToggleEl = document.getElementById("themeToggle");
+function currentTheme() { return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark"; }
+function syncThemeButton() {
+  // Show the theme you'd switch *to*, matching common toggle UX.
+  themeToggleEl.textContent = currentTheme() === "light" ? "🌙 Dark" : "☀️ Light";
+}
+syncThemeButton();
+themeToggleEl.addEventListener("click", () => {
+  const next = currentTheme() === "light" ? "dark" : "light";
+  document.documentElement.setAttribute("data-theme", next);
+  try { localStorage.setItem("skills-theme", next); } catch (e) { /* ignore */ }
+  syncThemeButton();
+});
 grid.addEventListener("click", e => {
   // Expand/collapse a clamped description.
   const toggle = e.target.closest(".desc-toggle");
